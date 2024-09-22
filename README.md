@@ -24,7 +24,7 @@ Installation
 Clone the repository
 bash
 Copy code
-git clone https://github.com/your-username/cloudflare-dns-updater.git
+git clone [https://github.com/your-username/cloudflare-dns-updater.git](https://github.com/SudoMds/CfRenew.git)
 cd cloudflare-dns-updater
 Install dependencies
 bash

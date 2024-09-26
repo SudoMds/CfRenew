@@ -21,10 +21,24 @@ COUNT = 5  # Default number of IPs to scan
 SPEED_DOMAIN = None
 cloud_ips = None
 
-# Example fronting function, replace with your implementation
-def fronting(ip):
-    # Return a custom DNS resolver or TCP connector settings
-    pass
+class fronting:
+    def __init__(self, ip):
+        self.ip = ip
+
+    async def resolve(self, hostname: str, port: int = 0, family: int = socket.AF_INET):
+        result = [
+            {
+                "hostname": hostname,
+                "host": self.ip,
+                "port": port,
+                "family": family,
+                "proto": 6,
+                "flags": socket.AI_NUMERICHOST | socket.AI_NUMERICSERV,
+            }
+        ]
+        return result
+
+
 
 async def create_data(size=SIZE):
     created_size = 0

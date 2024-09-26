@@ -343,8 +343,7 @@ else:
     if TYPE == 'server':
         SPEED_DOMAIN = ss_input(
             'Enter domain of your persoanl server behind cloudflare', 'speedtest.safasafari.ir', str)
-    SECURE = {'y': 's', 'n': ''}[
-        ss_input('Secure (y. https, n.http) ?', 'y', str)]
+    SECURE = SECURER
 f = open("good.txt", "w")
 cloud_ips = open('ips.txt', 'r').read().strip().split(
     "\n")[::-1] if len(sys.argv) < 2 else sys.argv[1:]

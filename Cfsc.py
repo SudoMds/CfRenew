@@ -6,20 +6,19 @@ import sys
 from aiohttp import ClientSession, ClientTimeout, TCPConnector
 import ipaddress
 import aiofiles
+import requests  # Ensure this is available if used
 
 # Constants
 CONFIG_FILE = "config.json"
-THREADS = 2  # Reduced number of threads for testing
-TIMEOUT = 15  # Increased timeout to allow for slower responses
-SIZE = 1024 * 128
+THREADS = 2  # Adjust threads for testing
+TIMEOUT = 15  # Timeout for responses
+SIZE = 1024 * 128  # Size of the data being sent
+SECURE = "s"  # HTTP/HTTPS toggle
 
-def ss_input(prompt, default='', t=int):
-    result = input('{}{}: '.format(
-        prompt, (" [" + str(default) + "] (Enter for default)") if str(default) != '' else ''))
-    if result == '':
-        return default
-    else:
-        return t(result)
+# Global variables
+SPEED_DOMAIN = None
+TYPE = "speed"  # Change this to "server" or other types as needed
+NUM_IPS = 10  # Number of IPs to handle per batch
 
 async def create_data(size=SIZE):
     created_size = 0
@@ -27,109 +26,96 @@ async def create_data(size=SIZE):
         created_size += 512
         yield b"S" * 512
 
-async def init():
-    count = ss_input('Enter the number of IPs you need', 5)
-    config = {
-        "COUNT": count,
-    }
-    with open(CONFIG_FILE, 'w') as file:
-        json.dump(config, file)
-    print("Initialization complete. You can now run the script with `python3 main.py run`.")
-
-async def find_speed_domain():
-    print('Finding working speed test server...')
-    speed_urls = open('speedtest_urls.txt', 'r').read().strip().split("\n") if os.path.exists('speedtest_urls.txt') else \
-                 requests.get('https://raw.githubusercontent.com/SafaSafari/ss-cloud-scanner/main/speedtest_urls.txt').content.decode().split('\n')
+async def check(ip):
+    global SPEED_DOMAIN
+    logging.debug(f"Attempting to connect to {SPEED_DOMAIN} from {ip}")
     
-    async with ClientSession() as session:
-        for url in speed_urls:
-            url = url.strip()
-            try:
-                async with session.get("https://" + url) as r:
-                    if r.status != 429:
-                        print("Selected Server:", url)
-                        return url
-            except Exception as e:
-                logging.error(f"Error accessing {url}: {e}")
-                continue
-    print("No working speed server found.")
-    exit()
-
-async def write_good_ip(ip):
-    async with aiofiles.open("good.txt", "a") as f:
-        await f.write(ip + "\n")
-
-async def check(ip, speed_domain, count):
-    logging.debug(f"Attempting to connect to {speed_domain} from {ip}")
     async with ClientSession(connector=TCPConnector(), timeout=ClientTimeout(total=TIMEOUT)) as sess:
         try:
-            async with sess.post(f'http://{speed_domain}/', data=create_data()) as r:
+            async with sess.post(
+                'http{}://{}/{}up'.format(SECURE, SPEED_DOMAIN, '__' if SPEED_DOMAIN == 'speed.cloudflare.com' else ''),
+                data=create_data()
+            ) as r:
                 if r.status != 200:
-                    logging.error(f"Failed to connect to {speed_domain}. Status code: {r.status}")
                     return
         except Exception as e:
-            logging.error(f"Exception occurred while checking IP {ip}: {e}")
+            logging.error(f"Error checking IP {ip}: {e}")
             return
-
-    await write_good_ip(ip)
-    logging.critical("Good IP found: {}".format(ip))
-    return count - 1  # Return updated count
-
-async def select(ips, speed_domain, count):
-    tasks = []
-    for ip in ips:
-        try:
-            network = ipaddress.ip_network(ip.strip(), strict=False)
-            for individual_ip in network:
-                tasks.append(check(str(individual_ip), speed_domain, count))
-        except ValueError as e:
-            logging.error(f"Invalid IP/network format: {ip}. Error: {e}")
-    results = await asyncio.gather(*tasks)
-    return sum(1 for result in results if result is not None)  # Count successful checks
-
-async def run():
-    if not os.path.exists(CONFIG_FILE):
-        print("Please initialize first: `python3 main.py init`")
-        return
-
-    try:
-        with open(CONFIG_FILE, 'r') as file:
-            config = json.load(file)
-            count = config["COUNT"]
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        print(f"Error loading configuration: {e}")
-        return
-
-    if not os.path.exists('ips.txt'):
-        print('Please download ips.txt file')
-        exit()
-
-    cloud_ips = open('ips.txt', 'r').read().strip().split("\n")
-    speed_domain = await find_speed_domain()
-
-    format = "%(asctime)s: %(message)s"
-    logging.basicConfig(format=format, level=logging.DEBUG, datefmt="%H:%M:%S")
     
-    for i in range(0, len(cloud_ips), THREADS):
-        batch = cloud_ips[i:i + THREADS]
-        count -= await select(batch, speed_domain, count)
-        if count <= 0:
-            logging.info("Reached the required number of good IPs.")
-            break
+    async with aiofiles.open("good_ips.txt", "a") as f:
+        await f.write(ip + "\n")
+    
+    logging.critical(f"Found good IP: {ip}")
+
+async def select(ips):
+    ipas = ipaddress.ip_network(ips)
+    print(f"Progress: {cloud_ips.index(ips) / len(cloud_ips) * 100:.2f}%", end='\r')
+
+    collect = []
+    for ip in ipas:
+        collect.append(str(ip))
+        if len(collect) % NUM_IPS == 0:
+            await asyncio.gather(*[check(ip) for ip in collect])
+            collect = []
+    
+    # Process remaining IPs if any
+    if collect:
+        await asyncio.gather(*[check(ip) for ip in collect])
+
+async def get_working_worker(speed_urls):
+    global SPEED_DOMAIN
+    for url in speed_urls:
+        url = url.strip()
+        try:
+            async with ClientSession() as session:
+                async with session.get(f"https://{url}") as r:
+                    if r.status != 429:
+                        return url
+        except Exception as e:
+            logging.error(f"Error accessing {url}: {e}")
+            continue
+    return None
 
 async def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 main.py <init|run>")
-        return
+    global SPEED_DOMAIN
 
-    command = sys.argv[1]
+    if TYPE == 'speed':
+        print('Finding worker', end='\r')
+        
+        speed_urls_sources = [
+            open('speedtest_urls.txt', 'r').readlines() if os.path.exists('speedtest_urls.txt') else [],
+            requests.get('https://raw.githubusercontent.com/SafaSafari/ss-cloud-scanner/main/speedtest_urls.txt').content.decode().split('\n')
+        ]
 
-    if command == "init":
-        await init()
-    elif command == "run":
-        await run()
-    else:
-        print("Usage: python3 main.py <init|run>")
+        for speed_urls in speed_urls_sources:
+            SPEED_DOMAIN = await get_working_worker(speed_urls)
+            if SPEED_DOMAIN:
+                break
+        
+        if SPEED_DOMAIN is None:
+            print("No worker found")
+            exit()
 
+        print(f"Selected Worker: {SPEED_DOMAIN}")
+
+    # Logging setup
+    format = "%(asctime)s: %(message)s"
+    logging.basicConfig(format=format, level=logging.CRITICAL, datefmt="%H:%M:%S")
+    
+    # Process IPs in batches of THREADS
+    for i in range(-(-len(cloud_ips) // THREADS)):  # Divide IPs into chunks of THREADS
+        batch = cloud_ips[i * THREADS:(i + 1) * THREADS]
+        await asyncio.gather(*[select(ip_range) for ip_range in batch])
+
+    # Optional success log
+    # logging.critical('All tasks completed!')
+
+# Example IPs list (cloud_ips) to test
+cloud_ips = [
+    '192.168.1.0/30',  # Replace with your actual list of IP ranges
+    '10.0.0.0/30'
+]
+
+# Run the main function
 if __name__ == "__main__":
     asyncio.run(main())

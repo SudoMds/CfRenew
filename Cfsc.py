@@ -40,7 +40,8 @@ def ss_input(prompt, default='', t=int):
         return default
     else:
         return t(result)
-
+        
+        
 async def create_data(size=SIZE):
     created_size = 0
     while size > created_size:

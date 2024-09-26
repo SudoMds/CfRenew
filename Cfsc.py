@@ -28,9 +28,18 @@ NUM_IPS = 2
 SIZE = 1024 * 128
 
 
-# Set global variables directly
-COUNT = 5  # Global variable for IP count
-TYPE = 'speed'  # Global variable for type
+# Global Variables
+COUNT = 5  # Set to the required number of IPs
+TYPE = 'speed'  # Default type set to 'speed'
+SECURE = 'y'  # Default secure option set to 'y'
+
+def ss_input(prompt, default='', t=int):
+    result = input('{}{}: '.format(
+        prompt, (" [" + str(default) + "] (Enter for default)") if str(default) != '' else ''))
+    if result == '':
+        return default
+    else:
+        return t(result)
 
 async def create_data(size=SIZE):
     created_size = 0
@@ -315,7 +324,6 @@ if not os.path.exists('ips.txt'):
     exit()
 
 
-
 if TYPE in ['vmess', 'vless']:
     LINK = ss_input('Enter {} share link, {}://'.format(TYPE, TYPE), t=str)
     ID, HOST, PORT, PATH, SECURE, NETWORK = VmessSS.parse_link(
@@ -332,8 +340,7 @@ else:
     if TYPE == 'server':
         SPEED_DOMAIN = ss_input(
             'Enter domain of your persoanl server behind cloudflare', 'speedtest.safasafari.ir', str)
-    SECURE = {'y': 's', 'n': ''}[
-        ss_input('Secure (y. https, n.http) ?', 'y', str)]
+
 f = open("good.txt", "w")
 cloud_ips = open('ips.txt', 'r').read().strip().split(
     "\n")[::-1] if len(sys.argv) < 2 else sys.argv[1:]

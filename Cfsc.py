@@ -55,8 +55,7 @@ async def find_speed_domain():
 async def check(ip, speed_domain, f):
     global COUNT
     if COUNT <= 0:
-        f.close()
-        os._exit(1)
+        return
 
     async with ClientSession(connector=TCPConnector(), timeout=ClientTimeout(total=TIMEOUT)) as sess:
         try:
@@ -71,10 +70,14 @@ async def check(ip, speed_domain, f):
     logging.critical("Good IP found: {}".format(ip))
 
 async def select(ips, speed_domain, f):
-    ipas = ipaddress.ip_network(ips)
     tasks = []
-    for ip in ipas:
-        tasks.append(check(str(ip), speed_domain, f))
+    for ip in ips:
+        try:
+            network = ipaddress.ip_network(ip.strip(), strict=False)  # Allows both network ranges and single IPs
+            for individual_ip in network:
+                tasks.append(check(str(individual_ip), speed_domain, f))
+        except ValueError as e:
+            logging.error(f"Invalid IP/network format: {ip}. Error: {e}")
     await asyncio.gather(*tasks)
 
 async def run():

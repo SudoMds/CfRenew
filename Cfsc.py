@@ -8,8 +8,8 @@ import ipaddress
 
 # Constants
 CONFIG_FILE = "config.json"
-THREADS = 4
-TIMEOUT = 5
+THREADS = 2  # Reduced number of threads for testing
+TIMEOUT = 15  # Increased timeout to allow for slower responses
 SIZE = 1024 * 128
 
 def ss_input(prompt, default='', t=int):
@@ -47,7 +47,8 @@ async def find_speed_domain():
                     if r.status != 429:
                         print("Selected Server:", url)
                         return url
-            except:
+            except Exception as e:
+                logging.error(f"Error accessing {url}: {e}")
                 continue
     print("No working speed server found.")
     exit()
@@ -57,12 +58,15 @@ async def check(ip, speed_domain, f):
     if COUNT <= 0:
         return
 
+    logging.debug(f"Attempting to connect to {speed_domain} from {ip}")
     async with ClientSession(connector=TCPConnector(), timeout=ClientTimeout(total=TIMEOUT)) as sess:
         try:
             async with sess.post(f'http://{speed_domain}/', data=create_data()) as r:
                 if r.status != 200:
+                    logging.error(f"Failed to connect to {speed_domain}. Status code: {r.status}")
                     return
-        except:
+        except Exception as e:
+            logging.error(f"Exception occurred while checking IP {ip}: {e}")
             return
 
     COUNT -= 1
@@ -73,7 +77,7 @@ async def select(ips, speed_domain, f):
     tasks = []
     for ip in ips:
         try:
-            network = ipaddress.ip_network(ip.strip(), strict=False)  # Allows both network ranges and single IPs
+            network = ipaddress.ip_network(ip.strip(), strict=False)
             for individual_ip in network:
                 tasks.append(check(str(individual_ip), speed_domain, f))
         except ValueError as e:
@@ -99,7 +103,7 @@ async def run():
     speed_domain = await find_speed_domain()
 
     format = "%(asctime)s: %(message)s"
-    logging.basicConfig(format=format, level=logging.CRITICAL, datefmt="%H:%M:%S")
+    logging.basicConfig(format=format, level=logging.DEBUG, datefmt="%H:%M:%S")
     
     with open("good.txt", "a") as f:
         for i in range(0, len(cloud_ips), THREADS):

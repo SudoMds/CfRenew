@@ -434,11 +434,11 @@ async def select(ips):
     collect = []
     for ip in ipas:
         collect.append(str(ip))
-        if len(collect) >= NUM_IPS:
-            await asyncio.gather(*[check(range_ip) for range_ip in collect])
+        if len(collect) % NUM_IPS == 0:
+            await asyncio.gather(*[check(range) for range in collect])
             collect = []
-    if collect:
-        await asyncio.gather(*[check(range_ip) for range_ip in collect])
+            return
+    await asyncio.gather(*[check(range) for range in collect])
 
 async def main():
     if TYPE == 'speed':

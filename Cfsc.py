@@ -3,9 +3,14 @@ import json
 import asyncio
 import logging
 import sys
+from aiohttp import ClientSession, ClientTimeout, TCPConnector
+import ipaddress
 
 # Constants
 CONFIG_FILE = "config.json"
+THREADS = 4
+TIMEOUT = 5
+SIZE = 1024 * 128
 
 def ss_input(prompt, default='', t=int):
     result = input('{}{}: '.format(
@@ -15,21 +20,64 @@ def ss_input(prompt, default='', t=int):
     else:
         return t(result)
 
-def init():
-    config = {
-        "COUNT": ss_input('Enter count of IPs you need', 5),
-        "SPEED_DOMAIN": ss_input(
-            'Enter domain of your personal server behind Cloudflare', 'speedtest.example.com', str),
-        "SECURE": {'y': 's', 'n': ''}[ss_input('Secure (y. https, n. http)?', 'y', str)]
-    }
+async def create_data(size=SIZE):
+    created_size = 0
+    while size > created_size:
+        created_size += 512
+        yield b"S" * 512
 
-    # Save config to file
+async def init():
+    count = ss_input('Enter the number of IPs you need', 5)
+    config = {
+        "COUNT": count,
+    }
     with open(CONFIG_FILE, 'w') as file:
         json.dump(config, file)
-
     print("Initialization complete. You can now run the script with `python3 main.py run`.")
 
-def run():
+async def find_speed_domain():
+    print('Finding working speed test server...')
+    speed_urls = open('speedtest_urls.txt', 'r').read().strip().split("\n") if os.path.exists('speedtest_urls.txt') else \
+                 requests.get('https://raw.githubusercontent.com/SafaSafari/ss-cloud-scanner/main/speedtest_urls.txt').content.decode().split('\n')
+    async with ClientSession() as session:
+        for url in speed_urls:
+            url = url.strip()
+            try:
+                async with session.get("https://" + url) as r:
+                    if r.status != 429:
+                        print("Selected Server:", url)
+                        return url
+            except:
+                continue
+    print("No working speed server found.")
+    exit()
+
+async def check(ip, speed_domain, f):
+    global COUNT
+    if COUNT <= 0:
+        f.close()
+        os._exit(1)
+
+    async with ClientSession(connector=TCPConnector(), timeout=ClientTimeout(total=TIMEOUT)) as sess:
+        try:
+            async with sess.post(f'http://{speed_domain}/', data=create_data()) as r:
+                if r.status != 200:
+                    return
+        except:
+            return
+
+    COUNT -= 1
+    f.write(ip + "\n")
+    logging.critical("Good IP found: {}".format(ip))
+
+async def select(ips, speed_domain, f):
+    ipas = ipaddress.ip_network(ips)
+    tasks = []
+    for ip in ipas:
+        tasks.append(check(str(ip), speed_domain, f))
+    await asyncio.gather(*tasks)
+
+async def run():
     if not os.path.exists(CONFIG_FILE):
         print("Please initialize first: `python3 main.py init`")
         return
@@ -37,14 +85,23 @@ def run():
     with open(CONFIG_FILE, 'r') as file:
         config = json.load(file)
 
+    global COUNT
     COUNT = config["COUNT"]
-    SPEED_DOMAIN = config["SPEED_DOMAIN"]
-    SECURE = config["SECURE"]
 
-    # Add your existing code logic here, using the SPEED_DOMAIN and SECURE as needed
+    if not os.path.exists('ips.txt'):
+        print('Please download ips.txt file')
+        exit()
 
-    # Run additional script at the end
-    exec(open("additional_script.py").read())
+    cloud_ips = open('ips.txt', 'r').read().strip().split("\n")
+    speed_domain = await find_speed_domain()
+
+    format = "%(asctime)s: %(message)s"
+    logging.basicConfig(format=format, level=logging.CRITICAL, datefmt="%H:%M:%S")
+    
+    with open("good.txt", "a") as f:
+        for i in range(0, len(cloud_ips), THREADS):
+            batch = cloud_ips[i:i+THREADS]
+            await select(batch, speed_domain, f)
 
 async def main():
     if len(sys.argv) < 2:
@@ -54,9 +111,9 @@ async def main():
     command = sys.argv[1]
 
     if command == "init":
-        init()
+        await init()
     elif command == "run":
-        run()
+        await run()
     else:
         print("Usage: python3 main.py <init|run>")
 

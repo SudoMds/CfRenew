@@ -7,20 +7,22 @@ from aiohttp import ClientSession, ClientTimeout, TCPConnector
 import ipaddress
 import aiofiles
 import requests
+import socket
 
 # Constants
 CONFIG_FILE = "config.json"
-THREADS = 2  # Adjust threads for testing
-TIMEOUT = 15  # Timeout for responses
-SIZE = 1024 * 128  # Size of the data being sent
-SECURE = "s"  # HTTP/HTTPS toggle
-NUM_IPS = 10  # Number of IPs to handle per batch
-COUNT = 5  # Default number of IPs to scan
+THREADS = 2
+TIMEOUT = 15
+SIZE = 1024 * 128
+SECURE = "s"
+NUM_IPS = 10
+COUNT = 5
 
 # Global variables
 SPEED_DOMAIN = None
 cloud_ips = None
 
+# Define the fronting class
 class fronting:
     def __init__(self, ip):
         self.ip = ip
@@ -38,7 +40,13 @@ class fronting:
         ]
         return result
 
-
+def ss_input(prompt, default='', t=int):
+    result = input('{}{}: '.format(
+        prompt, (" [" + str(default) + "] (Enter for default)") if str(default) != '' else ''))
+    if result == '':
+        return default
+    else:
+        return t(result)
 
 async def create_data(size=SIZE):
     created_size = 0
@@ -54,7 +62,8 @@ async def check(ip):
         os._exit(1)
 
     # Handle 'speed' type
-    async with ClientSession(connector=TCPConnector(resolver=fronting(ip)), timeout=ClientTimeout(total=TIMEOUT)) as sess:
+    resolver = fronting(ip)  # Use fronting class here
+    async with ClientSession(connector=TCPConnector(resolver=resolver), timeout=ClientTimeout(total=TIMEOUT)) as sess:
         try:
             async with sess.post(
                 'http{}://{}/{}up'.format(SECURE, SPEED_DOMAIN, '__' if SPEED_DOMAIN == 'speed.cloudflare.com' else ''),

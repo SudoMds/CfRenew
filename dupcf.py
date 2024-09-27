@@ -151,7 +151,7 @@ def read_ips_from_file():
     try:
         with open(IP_FILE, 'r') as file:
             ips = [line.strip() for line in file if line.strip()]
-        logging.info("Read %d IP addresses from '%s'.", len(ips), IP_FILE)
+        logging.info("Read %d IP address(es) from '%s'.", len(ips), IP_FILE)
     except Exception as e:
         print(f"Error reading IP file: {e}")
         logging.error("Error reading IP file '%s': %s", IP_FILE, e)
@@ -164,12 +164,13 @@ def read_ips_from_file():
 
     return ips
 
-def create_records():
+def replace_records():
     """
-    Create or update A records for each IP address using the Cloudflare API.
+    Replace existing A records for the specified subdomain by removing all existing records
+    and creating new ones based on the IPs listed in the IP file.
     """
     print_header()
-    logging.info("Starting DNS A records creation process.")
+    logging.info("Starting DNS A records replacement process.")
 
     settings = read_settings()
     
@@ -182,35 +183,48 @@ def create_records():
         sys.exit(1)
 
     zone_id = settings['zone_id']
-    base_subdomain = settings['subdomain']
+    subdomain = settings['subdomain']
 
-    ips = read_ips_from_file()
-    num_ips = len(ips)
+    desired_ips = read_ips_from_file()
+    num_ips = len(desired_ips)
     print(f"Found {num_ips} IP address(es) in '{IP_FILE}'.")
     logging.info("Processing %d IP address(es).", num_ips)
 
-    # Fetch existing DNS records for the subdomain
+    # Fetch existing DNS A records for the subdomain
     try:
-        existing_records = cf.zones.dns_records.get(zone_id, params={"name": base_subdomain, "type": "A"})
-        existing_ips = {record['content']: record['id'] for record in existing_records}
-        logging.info("Fetched existing DNS A records for '%s'.", base_subdomain)
+        existing_records = cf.zones.dns_records.get(
+            zone_id, 
+            params={"name": subdomain, "type": "A"}
+        )
+        logging.info("Fetched existing DNS A records for '%s'.", subdomain)
     except CloudFlare.exceptions.CloudFlareAPIError as e:
         print(f"Error fetching existing DNS records: {e}")
         logging.error("Error fetching existing DNS records: %s", e)
         sys.exit(1)
 
-    for ip_address in ips:
-        if ip_address in existing_ips:
-            print(f"A record for '{base_subdomain}' with IP '{ip_address}' already exists. Skipping.")
-            logging.info("A record for '%s' with IP '%s' already exists.", base_subdomain, ip_address)
-            continue
+    # Delete all existing A records for the subdomain
+    for record in existing_records:
+        record_id = record['id']
+        record_ip = record['content']
+        print(f"Deleting existing A record for '{subdomain}' with IP '{record_ip}'...")
+        logging.info("Deleting A record: %s -> %s (ID: %s)", subdomain, record_ip, record_id)
+        try:
+            cf.zones.dns_records.delete(zone_id, record_id)
+            print(f"Successfully deleted A record: {subdomain} -> {record_ip}")
+            logging.info("Successfully deleted A record: %s -> %s", subdomain, record_ip)
+            time.sleep(0.2)  # Sleep for 200ms to respect rate limits
+        except CloudFlare.exceptions.CloudFlareAPIError as e:
+            print(f"Error deleting A record for '{subdomain}': {e}")
+            logging.error("Error deleting A record for '%s': %s", subdomain, e)
 
-        print(f"Creating A record for '{base_subdomain}' with IP '{ip_address}'...")
-        logging.info("Creating A record: %s -> %s", base_subdomain, ip_address)
+    # Create new A records based on the IPs from the IP file
+    for ip_address in desired_ips:
+        print(f"Creating A record for '{subdomain}' with IP '{ip_address}'...")
+        logging.info("Creating A record: %s -> %s", subdomain, ip_address)
 
         a_record = {
             "type": "A",
-            "name": base_subdomain,
+            "name": subdomain,
             "ttl": 60,  # TTL of 1 minute
             "content": ip_address,
             "proxied": False  # Set to True if you want Cloudflare's proxy features
@@ -218,15 +232,15 @@ def create_records():
 
         try:
             cf.zones.dns_records.post(zone_id, data=a_record)
-            print(f"Successfully created A record: {base_subdomain} -> {ip_address}")
-            logging.info("Successfully created A record: %s -> %s", base_subdomain, ip_address)
+            print(f"Successfully created A record: {subdomain} -> {ip_address}")
+            logging.info("Successfully created A record: %s -> %s", subdomain, ip_address)
             time.sleep(0.2)  # Sleep for 200ms to respect rate limits
         except CloudFlare.exceptions.CloudFlareAPIError as e:
-            print(f"Error creating A record for '{base_subdomain}': {e}")
-            logging.error("Error creating A record for '%s': %s", base_subdomain, e)
+            print(f"Error creating A record for '{subdomain}': {e}")
+            logging.error("Error creating A record for '%s': %s", subdomain, e)
 
-    print("DNS A records update process completed.")
-    logging.info("DNS A records update process completed.")
+    print("DNS A records replacement process completed.")
+    logging.info("DNS A records replacement process completed.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Cloudflare DNS A Record Updater")
@@ -236,4 +250,4 @@ if __name__ == "__main__":
     if args.action == "iscript":
         init_settings()
     elif args.action == "rscript":
-        create_records()
+        replace_records()

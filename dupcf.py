@@ -80,7 +80,7 @@ def read_ips_from_file():
     return ips
 
 def create_records():
-    """Create A records for each IP address using the Cloudflare API."""
+    """Create or update A records for each IP address using the Cloudflare API."""
     print_header()
 
     settings = read_settings()
@@ -92,16 +92,20 @@ def create_records():
     num_ips = len(ips)
     print(f"Found {num_ips} IP addresses in the file.")
 
-    # Use a fixed name for all records
-    record_name = base_subdomain  # Assuming base_subdomain includes the full domain path
+    # Fetch existing DNS records for the subdomain
+    existing_records = cf.zones.dns_records.get(zone_id, params={"name": base_subdomain})
+    existing_ips = {record['content']: record['id'] for record in existing_records if record['type'] == 'A'}
 
-    # Create A records for each IP address
     for ip_address in ips:
-        print(f"Creating A record for {record_name} with IP {ip_address}")
+        if ip_address in existing_ips:
+            print(f"A record for {base_subdomain} with IP {ip_address} already exists. Skipping.")
+            continue
+
+        print(f"Creating A record for {base_subdomain} with IP {ip_address}")
 
         a_record = {
             "type": "A",
-            "name": record_name,
+            "name": base_subdomain,
             "ttl": 60,  # TTL of 1 minute
             "content": ip_address,
             "proxied": False  # Set to True if you want Cloudflare's proxy features
@@ -109,11 +113,11 @@ def create_records():
 
         try:
             cf.zones.dns_records.post(zone_id, data=a_record)
-            print(f"Successfully created A record: {record_name} -> {ip_address}")
+            print(f"Successfully created A record: {base_subdomain} -> {ip_address}")
         except CloudFlare.exceptions.CloudFlareAPIError as e:
-            print(f"Error creating A record for {record_name}: {e}")
+            print(f"Error creating A record for {base_subdomain}: {e}")
 
-    print(f"Created {num_ips} A records successfully.")
+    print("DNS A records update process completed.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Cloudflare DNS A Record Updater")
